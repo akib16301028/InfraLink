@@ -235,6 +235,45 @@ with tab_main:
             missing_results = []
             port_corrections = []
 
+            # NEW PORT CORRECTION LOGIC: Find all port inconsistencies
+            # Group the main_df by normalized link to find groups with multiple entries
+            link_groups = main_df.groupby('Normalized')
+            for norm_link, group in link_groups:
+                # Check if this link has multiple rows (implying potential port inconsistencies)
+                if len(group) > 1:
+                    # Get all unique ports for this link
+                    unique_src_ports = group['Source Port'].astype(str).str.strip().unique()
+                    unique_dst_ports = group['Destination Port'].astype(str).str.strip().unique()
+                    
+                    # Find the preferred ports for this link (Eth/ae priority)
+                    sample_row = group.iloc[0]
+                    src, dst = sample_row['Source'], sample_row['Destination']
+                    corr_src_port, corr_dst_port = get_preferred_ports(main_df, src, dst)
+                    
+                    # For each row in the group, check if its ports match the corrected ones
+                    for _, row in group.iterrows():
+                        orig_src = str(row['Source Port']).strip()
+                        orig_dst = str(row['Destination Port']).strip()
+                        corr_src = str(corr_src_port).strip() if corr_src_port else 'N/A'
+                        corr_dst = str(corr_dst_port).strip() if corr_dst_port else 'N/A'
+                        
+                        if orig_src != corr_src or orig_dst != corr_dst:
+                            port_corrections.append({
+                                'Link Name': f"{src} to {dst}",
+                                'Source': src,
+                                'Original Source Port': orig_src,
+                                'Corrected Source Port': corr_src,
+                                'Destination': dst,
+                                'Original Destination Port': orig_dst,
+                                'Corrected Destination Port': corr_dst,
+                                'Port Priority Applied': (
+                                    corr_src.lower().startswith(('eth', 'ae')) or
+                                    corr_dst.lower().startswith(('eth', 'ae'))
+                                ),
+                                'Issue': 'Port Mismatch'
+                            })
+
+            # Continue with the original analysis for missing links
             for norm_link in all_links:
                 subset = main_df[(main_df['Source'].isin(norm_link)) & (main_df['Destination'].isin(norm_link))]
                 if subset.empty:
@@ -260,25 +299,6 @@ with tab_main:
                         'Corrected Source Port': corr_src_port,
                         'Destination': dst,
                         'Corrected Destination Port': corr_dst_port
-                    })
-                
-                # Only show port corrections if ports differ from preferred ones
-                if (str(original['Source Port']).strip() != str(corr_src_port).strip() or 
-                    str(original['Destination Port']).strip() != str(corr_dst_port).strip()):
-                    port_corrections.append({
-                        'Link Name': f"{src} to {dst}",
-                        'Source': src,
-                        'Original Source Port': original['Source Port'],
-                        'Corrected Source Port': corr_src_port,
-                        'Destination': dst,
-                        'Original Destination Port': original['Destination Port'],
-                        'Corrected Destination Port': corr_dst_port,
-                        'Port Priority Applied': (
-                            bool(corr_src_port and (str(corr_src_port).lower().startswith('eth') or 
-                                                   str(corr_src_port).lower().startswith('ae'))) or
-                            bool(corr_dst_port and (str(corr_dst_port).lower().startswith('eth') or 
-                                                   str(corr_dst_port).lower().startswith('ae')))
-                        )
                     })
 
             analysis_df = pd.DataFrame(analysis_results)
