@@ -2,11 +2,31 @@ import streamlit as st
 import pandas as pd
 import numpy as np
 from io import BytesIO
+import re
 
 # ---------- Utility functions ----------
+def extract_match_part(device_name):
+    """Extract the relevant part of device name based on underscore rules"""
+    if not isinstance(device_name, str):
+        return str(device_name)
+    
+    parts = device_name.split('_')
+    
+    # If only one underscore, take everything after it
+    if len(parts) == 2:
+        return parts[1]
+    # If multiple underscores, take everything after the second-to-last underscore
+    elif len(parts) > 2:
+        return '_'.join(parts[-2:])
+    # If no underscores, use the full name
+    else:
+        return device_name
+
 def normalize_link(source, destination):
-    """Ensure consistent link representation (alphabetical order)"""
-    return tuple(sorted([str(source).strip(), str(destination).strip()]))
+    """Ensure consistent link representation (alphabetical order) with underscore processing"""
+    src_match = extract_match_part(str(source).strip())
+    dst_match = extract_match_part(str(destination).strip())
+    return tuple(sorted([src_match, dst_match]))
 
 def canonicalize_columns(df):
     """Standardize column names for Source/Destination and their ports"""
@@ -275,13 +295,20 @@ with tab_main:
 
             # Continue with the original analysis for missing links
             for norm_link in all_links:
-                subset = main_df[(main_df['Source'].isin(norm_link)) & (main_df['Destination'].isin(norm_link))]
-                if subset.empty:
+                # Find all rows in main_df that match this normalized link
+                main_subset = main_df[main_df['Normalized'] == norm_link]
+                if main_subset.empty:
                     continue
-                original = subset.iloc[0]
+                    
+                # Get the original source and destination from the first row
+                original = main_subset.iloc[0]
                 src, dst = original['Source'], original['Destination']
-                corr_src_port, corr_dst_port = get_preferred_ports(main_df, src, dst)
+                
+                # Check if this normalized link exists in the match database
                 exists = norm_link in match_links
+                
+                # Get the preferred ports for this link
+                corr_src_port, corr_dst_port = get_preferred_ports(main_df, src, dst)
 
                 analysis_results.append({
                     'Link Name': f"{src} to {dst}",
@@ -289,7 +316,8 @@ with tab_main:
                     'Original Source Port': original['Source Port'],
                     'Destination': dst,
                     'Original Destination Port': original['Destination Port'],
-                    'Match Status': 'Found' if exists else 'Missing'
+                    'Match Status': 'Found' if exists else 'Missing',
+                    'Normalized Link': str(norm_link)  # For debugging
                 })
 
                 if not exists:
@@ -298,7 +326,8 @@ with tab_main:
                         'Source': src,
                         'Corrected Source Port': corr_src_port,
                         'Destination': dst,
-                        'Corrected Destination Port': corr_dst_port
+                        'Corrected Destination Port': corr_dst_port,
+                        'Normalized Link': str(norm_link)  # For debugging
                     })
 
             analysis_df = pd.DataFrame(analysis_results)
